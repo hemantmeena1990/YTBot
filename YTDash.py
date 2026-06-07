@@ -13,6 +13,7 @@ Features:
 - Traffic source simulation (Google Search, WhatsApp Web, etc.)
 """
 
+import os
 import sys
 import json
 import webbrowser
