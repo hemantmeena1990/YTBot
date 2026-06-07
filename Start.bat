@@ -1,77 +1,54 @@
 @echo off
-setlocal enabledelayedexpansion
-title YouTube Automation Dashboard Launcher
+title YouTube Automation Dashboard
 echo ==============================================
-echo   YouTube Automation Dashboard - Setup & Launch
+echo   YouTube Automation Dashboard
 echo ==============================================
 echo.
+
+cd /d "%~dp0"
 
 REM Check Python
+echo Checking Python...
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python is not installed or not in PATH.
-    echo Please install Python 3.8+ from https://python.org
+    echo ERROR: Python not found
     pause
     exit /b 1
 )
-echo [OK] Python found:
 python --version
+echo.
 
-REM Check pip
-pip --version >nul 2>&1
+REM Install packages
+echo Installing required packages...
+pip install --upgrade flask selenium webdriver-manager psutil requests yt-dlp playwright bgutil-ytdlp-pot-provider
+echo.
+
+REM Install Playwright browsers
+echo Checking Playwright browsers...
+python -c "from playwright.sync_api import sync_playwright; sync_playwright().start().stop()" 2>nul
 if errorlevel 1 (
-    echo [ERROR] pip is not available.
-    echo Please ensure pip is installed.
-    pause
-    exit /b 1
+    echo Installing Playwright Chromium...
+    playwright install chromium
 )
-echo [OK] pip found
-
 echo.
-echo Checking required Python packages...
 
-set PACKAGES=flask selenium webdriver-manager psutil requests
-set MISSING=
-
-for %%p in (%PACKAGES%) do (
-    python -c "import %%p" 2>nul
-    if errorlevel 1 (
-        echo [MISSING] %%p
-        set MISSING=1
-    ) else (
-        echo [OK] %%p
-    )
+REM Check if Node.js server exists and start it
+if exist "bgutil-ytdlp-pot-provider\server\build\main.js" (
+    echo Starting PO Token HTTP Server on port 4416...
+    start "PO Token Server" /min cmd /c "cd bgutil-ytdlp-pot-provider\server && node build/main.js --port 4416"
+    timeout /t 3 /nobreak >nul
+    echo Server started.
+) else (
+    echo WARNING: PO token server not found. Install from: https://github.com/Brainicism/bgutil-ytdlp-pot-provider
 )
-
-if defined MISSING (
-    echo.
-    set /p INSTALL="Some packages are missing. Install them now? (y/n): "
-    if /i "!INSTALL!"=="y" (
-        echo Installing missing packages...
-        for %%p in (%PACKAGES%) do (
-            python -c "import %%p" 2>nul
-            if errorlevel 1 (
-                echo Installing %%p...
-                pip install %%p
-            )
-        )
-        echo Installation complete.
-    ) else (
-        echo Please install required packages manually.
-        pause
-        exit /b 1
-    )
-)
-
 echo.
-echo All prerequisites satisfied.
-echo Launching Dashboard in minimized window...
 
-REM Launch YTDash.py minimized (the dashboard will open browser automatically)
-start /min python YTDash.py
-
+REM Launch dashboard
+echo Starting Dashboard...
 echo.
-echo Dashboard is starting. You can close this window.
-echo Dashboard will open automatically in your browser.
-timeout /t 2 /nobreak >nul
-exit
+echo Dashboard will open at http://127.0.0.1:5000
+echo.
+
+python YTDash.py
+
+pause

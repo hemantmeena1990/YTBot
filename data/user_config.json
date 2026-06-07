@@ -1,15 +1,16 @@
 {
-  "url": "https://www.youtube.com/watch?v=1fFsGi836fM",
+  "url": "https://www.youtube.com/watch?v=gYuhqMcoj0k",
   "num_instances": 1,
   "cycles": 1,
   "headless": false,
   "min_watch_time": 15,
-  "max_watch_time": 104,
-  "suggested_min": 15,
-  "suggested_max": 35,
+  "max_watch_time": 164,
+  "suggested_min": 5,
+  "suggested_max": 15,
   "suggested_chance": 1,
   "use_proxy": false,
   "proxy_url": "",
   "channel_name": "@rajasthanidesidiaries",
-  "view_type": ""
+  "view_type": "Google Search",
+  "traffic_source": "direct"
 }

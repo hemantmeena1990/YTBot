@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 YouTube Automation - DIRECT ENTRY MODE (Config-only)
-Uses shared human_behavior module.
+With PO token support using shared modules
 """
 
 import sys
@@ -22,21 +22,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
 from webdriver_manager.chrome import ChromeDriverManager
 
-# Correct imports: utils for page load & cookies, human_behavior for interactions
+# Import from selenium/common
 from common.utils import (
-    get_random_resolution, handle_cookies, get_variable_watch_time, wait_for_page_load
+    handle_cookies, get_variable_watch_time, wait_for_page_load
 )
 from common.human_behavior import (
     watch_with_human_behavior, start_video_with_audio_mute, click_suggested_video,
     ensure_video_playback
 )
 
-# Setup logging to file
+# Import PO token shared modules
+from common.po_token import get_po_token, add_po_token_to_url, set_logger as set_po_logger
+from common.po_driver import create_driver_with_po_token, set_logger as set_driver_logger
+
+# Setup logging
 DATA_DIR = Path(__file__).parent.parent / "data"
 LOG_DIR = DATA_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -51,11 +52,17 @@ ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(ch)
 
-# ---------- Configuration ----------
+# Share logger with PO modules
+set_po_logger(logger)
+set_driver_logger(logger)
+
+
+# ========== Configuration ==========
 class ViewType(Enum):
     DIRECT_UNKNOWN = 1
     SUGGESTED = 2
     OTHER_YOUTUBE = 3
+
 
 @dataclass
 class SessionConfig:
@@ -71,41 +78,24 @@ class SessionConfig:
     user_agent: str
     is_mobile: bool
     constructed_url: str
+    video_id: str = ""
+    po_token: str = None
+    visitor_id: str = None
 
-# ---------- Browser setup ----------
-def create_driver(cfg: SessionConfig):
-    opts = Options()
-    if cfg.headless:
-        opts.add_argument("--headless=new")
-    opts.add_argument("--disable-blink-features=AutomationControlled")
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--disable-notifications")
-    opts.add_argument("--lang=en-US")
-    opts.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
-    opts.add_experimental_option('useAutomationExtension', False)
-    opts.add_argument(f"user-agent={cfg.user_agent}")
-    if not cfg.headless:
-        w, h = get_random_resolution(cfg.is_mobile)
-        opts.add_argument(f"--window-size={w},{h}")
-    else:
-        opts.add_argument("--window-size=1920,1080")
-    timestamp = int(time.time())
-    profile_dir = os.path.join(os.getcwd(), f"yt_direct_cache_{cfg.instance_id}_{timestamp}")
-    opts.add_argument(f"--user-data-dir={profile_dir}")
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=opts)
-    driver.set_page_load_timeout(30)
-    return driver, profile_dir
 
-# ---------- Session runner ----------
+# ========== Session Runner ==========
 def run_session(cfg: SessionConfig):
     driver = None
     profile_dir = None
     try:
-        driver, profile_dir = create_driver(cfg)
-        driver.get(cfg.constructed_url)
+        driver, profile_dir = create_driver_with_po_token(cfg, "yt_direct_cache")
+        
+        # Add PO token to URL
+        watch_url = add_po_token_to_url(cfg.constructed_url, cfg.po_token)
+        if cfg.po_token:
+            logger.info(f"Instance {cfg.instance_id}: Added PO token to URL")
+        
+        driver.get(watch_url)
         wait_for_page_load(driver, 25)
         handle_cookies(driver, cfg.instance_id)
 
@@ -117,11 +107,11 @@ def run_session(cfg: SessionConfig):
         logger.info(f"Instance {cfg.instance_id}: Watching main for {main_watch}s")
         watch_with_human_behavior(driver, main_watch, cfg.is_mobile)
 
-        # Suggested video (for ALL view types)
+        # Suggested video
         if random.random() < cfg.suggested_chance:
             logger.info(f"Instance {cfg.instance_id}: Attempting suggested video")
             if click_suggested_video(driver, cfg.is_mobile):
-                time.sleep(2)  # allow mobile transition
+                time.sleep(2)
                 wait_for_page_load(driver, 20)
                 handle_cookies(driver, cfg.instance_id)
                 start_video_with_audio_mute(driver, cfg.instance_id, cfg.is_mobile, is_suggested=True)
@@ -140,15 +130,19 @@ def run_session(cfg: SessionConfig):
         if profile_dir and os.path.exists(profile_dir):
             shutil.rmtree(profile_dir, ignore_errors=True)
 
+
+# ========== Main ==========
 def main():
     if len(sys.argv) < 2 or not sys.argv[1].endswith('.json'):
         logger.error("Usage: python YTDirect.py <config.json>")
         sys.exit(1)
-    with open(sys.argv[1], 'r') as f:
+    
+    with open(sys.argv[1], 'r', encoding='utf-8-sig') as f:
         instances = json.load(f)
 
     logger.info(f"Starting YTDirect with {len(instances)} instance(s)")
     processes = []
+    
     for d in instances:
         vt_map = {
             "Other YouTube features": ViewType.OTHER_YOUTUBE,
@@ -156,6 +150,13 @@ def main():
             "Suggested": ViewType.SUGGESTED
         }
         view_type = vt_map.get(d["view_type"], ViewType.DIRECT_UNKNOWN)
+        
+        video_id = d.get("video_id", "")
+        po_token = None
+        visitor_id = None
+        if video_id:
+            po_token, visitor_id = get_po_token(video_id, d["instance_id"])
+        
         cfg = SessionConfig(
             instance_id=d["instance_id"],
             urls=[d["url"]],
@@ -168,15 +169,21 @@ def main():
             headless=d["headless"],
             user_agent=d["user_agent"],
             is_mobile=d["is_mobile"],
-            constructed_url=d["constructed_url"]
+            constructed_url=d["constructed_url"],
+            video_id=video_id,
+            po_token=po_token,
+            visitor_id=visitor_id
         )
         p = Process(target=run_session, args=(cfg,))
         processes.append(p)
         p.start()
         time.sleep(random.uniform(1, 3))
+    
     for p in processes:
         p.join()
+    
     logger.info("All sessions finished")
+
 
 if __name__ == "__main__":
     main()
